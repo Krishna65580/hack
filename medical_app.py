@@ -5,13 +5,15 @@ Problem Statement #2: Healthcare Accessibility and Rural Health Assistant
 A non-diagnostic digital healthcare assistance platform that helps users
 understand general health information, locate nearby healthcare resources,
 and manage basic healthcare activities (reminders). This system does NOT
-diagnose or prescribe — every response is templated from a curated
-knowledge base and routes serious concerns to real medical professionals.
+diagnose or prescribe — it's powered by an LLM that is tightly prompted to
+stay non-diagnostic, and every response routes serious concerns to real
+medical professionals and emergency services.
 """
 
+import uuid
 import streamlit as st
 from datetime import datetime, date
-from engine import build_response
+from engine import stream_response, build_response
 from locator import search_facilities
 from knowledge_base import EMERGENCY_CONTACTS, DISCLAIMER
 
@@ -21,9 +23,29 @@ st.set_page_config(
     layout="wide",
 )
 
+# ---------- ChatGPT-style polish ----------
+st.markdown("""
+<style>
+    .block-container { padding-top: 1.5rem; max-width: 900px; }
+    [data-testid="stChatMessage"] { padding: 0.25rem 0; }
+    .urgent-banner {
+        background: #fee2e2; border: 1px solid #fca5a5; color: #7f1d1d;
+        padding: 0.9rem 1.1rem; border-radius: 10px; margin-bottom: 0.6rem;
+        font-weight: 600;
+    }
+    .stChatInput { position: sticky; bottom: 0; }
+</style>
+""", unsafe_allow_html=True)
+
+URGENT_BANNER_HTML = (
+    "<div class='urgent-banner'>🚨 This may be urgent — "
+    "call 108 (Ambulance) or 112 (Emergency) now, or go "
+    "to the nearest hospital.</div>"
+)
+
 # ---------- session state ----------
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = []  # [{"role": "user"/"assistant", "text": str, "urgent": bool}]
 if "reminders" not in st.session_state:
     st.session_state.reminders = []
 if "records" not in st.session_state:
@@ -45,6 +67,12 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
+    if page == "💬 Health Info Chat" and st.session_state.chat_history:
+        st.divider()
+        if st.button("🗑️ New chat", use_container_width=True):
+            st.session_state.chat_history = []
+            st.rerun()
+
     st.divider()
     st.caption("Built for HackSprint 2.0 — Dept. of CSE, AITAM")
 
@@ -54,19 +82,9 @@ st.info(DISCLAIMER, icon="⚕️")
 # ================= PAGE 1: CHAT =================
 if page == "💬 Health Info Chat":
     st.title("Health Information Assistant")
-    st.caption("Ask about common symptoms or health topics in your own words.")
+    st.caption("Ask about common symptoms or health topics, in your own words and language.")
 
-    def ask(text: str):
-        result = build_response(text)
-        st.session_state.chat_history.append({"role": "user", "text": text})
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "text": result["text"],
-            "urgent": result["urgent"],
-            "lang": result["language_name"],
-        })
-
-    # Welcome message shown only before the first question is asked
+    # Welcome message + quick topics, shown only before the first question
     if not st.session_state.chat_history:
         st.success(
             "👋 **Welcome!** I'm here to give you general health information, "
@@ -77,31 +95,61 @@ if page == "💬 Health Info Chat":
         suggestions = ["Fever", "Cough and cold", "Loose motions", "Headache",
                         "Skin rash", "Feeling stressed", "Child health", "Pregnancy care"]
         cols = st.columns(4)
+        clicked = None
         for i, s in enumerate(suggestions):
             with cols[i % 4]:
                 if st.button(s, use_container_width=True, key=f"sugg_{i}"):
-                    ask(s)
-                    st.rerun()
+                    clicked = s
+        if clicked:
+            st.session_state.chat_history.append({"role": "user", "text": clicked})
+            st.rerun()
 
-    query = st.text_input(
-        "Type your question",
-        placeholder="e.g. I have had a fever and cough for two days...",
-        label_visibility="collapsed",
+    # Render existing history as chat bubbles
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            with st.chat_message("user", avatar="🧑"):
+                st.markdown(msg["text"])
+        else:
+            with st.chat_message("assistant", avatar="⚕️"):
+                if msg.get("urgent"):
+                    st.markdown(URGENT_BANNER_HTML, unsafe_allow_html=True)
+                st.markdown(msg["text"])
+
+    # If the last message is from the user with no reply yet, generate one now
+    needs_reply = (
+        st.session_state.chat_history
+        and st.session_state.chat_history[-1]["role"] == "user"
     )
-
-    send = st.button("Ask", type="primary")
-
-    if send and query.strip():
-        ask(query)
+    if needs_reply:
+        latest = st.session_state.chat_history[-1]["text"]
+        history_so_far = st.session_state.chat_history[:-1]
+        with st.chat_message("assistant", avatar="⚕️"):
+            placeholder = st.empty()
+            urgent_placeholder = st.empty()
+            full_text = ""
+            urgent_shown = False
+            for chunk in stream_response(history_so_far, latest):
+                # Guard: don't assume engine.py has set these attributes yet.
+                # Reading an unset attribute here would raise AttributeError
+                # on the very first message of the app's lifetime.
+                if getattr(stream_response, "last_urgent", False) and not urgent_shown:
+                    urgent_placeholder.markdown(URGENT_BANNER_HTML, unsafe_allow_html=True)
+                    urgent_shown = True
+                full_text += chunk
+                placeholder.markdown(full_text + "▌")
+            placeholder.markdown(full_text)
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "text": getattr(stream_response, "last_full_text", None) or full_text,
+            "urgent": getattr(stream_response, "last_urgent", False),
+        })
         st.rerun()
 
-    for msg in reversed(st.session_state.chat_history):
-        if msg["role"] == "user":
-            st.markdown(f"**🧑 You:** {msg['text']}")
-        else:
-            box = st.error if msg.get("urgent") else st.success
-            box(msg["text"])
-        st.markdown("---")
+    # Chat input pinned at the bottom, ChatGPT-style
+    query = st.chat_input("Message Rural Health Assistant…")
+    if query and query.strip():
+        st.session_state.chat_history.append({"role": "user", "text": query.strip()})
+        st.rerun()
 
 # ================= PAGE 2: LOCATOR =================
 elif page == "🏥 Find Healthcare":
@@ -134,25 +182,36 @@ elif page == "⏰ Reminders":
         with c3:
             r_time = st.time_input("Time")
         submitted = st.form_submit_button("Add Reminder", type="primary")
-        if submitted and r_title.strip():
-            st.session_state.reminders.append({
-                "title": r_title, "date": str(r_date), "time": str(r_time),
-                "added": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            })
-            st.success(f"Reminder added: {r_title} on {r_date} at {r_time}")
+        if submitted:
+            # clear_on_submit wipes the form regardless of validity, so we
+            # must give explicit feedback rather than failing silently.
+            if not r_title.strip():
+                st.error("Please enter what the reminder is for.")
+            else:
+                st.session_state.reminders.append({
+                    "id": uuid.uuid4().hex,
+                    "title": r_title, "date": str(r_date), "time": str(r_time),
+                    "added": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                })
+                st.success(f"Reminder added: {r_title} on {r_date} at {r_time}")
 
     st.divider()
     if not st.session_state.reminders:
         st.caption("No reminders yet.")
     else:
         sorted_reminders = sorted(st.session_state.reminders, key=lambda r: (r["date"], r["time"]))
-        for i, r in enumerate(sorted_reminders):
+        for r in sorted_reminders:
             c1, c2 = st.columns([5, 1])
             with c1:
                 st.markdown(f"**{r['title']}** — {r['date']} at {r['time']}")
             with c2:
-                if st.button("✕", key=f"del_{i}"):
-                    st.session_state.reminders.remove(r)
+                # Key/removal by stable id, not list position — avoids
+                # deleting the wrong entry when reminders share the same
+                # title/date/time, and avoids widget-key churn on re-sort.
+                if st.button("✕", key=f"del_{r['id']}"):
+                    st.session_state.reminders = [
+                        x for x in st.session_state.reminders if x["id"] != r["id"]
+                    ]
                     st.rerun()
 
 # ================= PAGE 4: HEALTH NOTES =================
@@ -167,17 +226,21 @@ elif page == "📋 My Health Notes":
     with st.form("add_note", clear_on_submit=True):
         note = st.text_area("New note")
         submitted = st.form_submit_button("Save Note", type="primary")
-        if submitted and note.strip():
-            st.session_state.records.append({
-                "text": note, "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            })
-            st.success("Note saved.")
+        if submitted:
+            if not note.strip():
+                st.error("Note can't be empty.")
+            else:
+                st.session_state.records.append({
+                    "id": uuid.uuid4().hex,
+                    "text": note, "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                })
+                st.success("Note saved.")
 
     st.divider()
     if not st.session_state.records:
         st.caption("No notes yet.")
     else:
-        for i, rec in enumerate(reversed(st.session_state.records)):
+        for rec in reversed(st.session_state.records):
             with st.container(border=True):
                 st.caption(rec["date"])
                 st.write(rec["text"])
