@@ -13,7 +13,7 @@ medical professionals and emergency services.
 import uuid
 import streamlit as st
 from datetime import datetime, date
-from engine import stream_response, build_response
+from engine import build_response
 from locator import search_facilities
 from knowledge_base import EMERGENCY_CONTACTS, DISCLAIMER
 
@@ -122,26 +122,18 @@ if page == "💬 Health Info Chat":
     )
     if needs_reply:
         latest = st.session_state.chat_history[-1]["text"]
-        history_so_far = st.session_state.chat_history[:-1]
+        # build_response() is a single templated call (TF-IDF retrieval +
+        # keyword rules) — it takes just the query, not the full history,
+        # and returns the complete answer at once rather than a stream.
+        response = build_response(latest)
         with st.chat_message("assistant", avatar="⚕️"):
-            placeholder = st.empty()
-            urgent_placeholder = st.empty()
-            full_text = ""
-            urgent_shown = False
-            for chunk in stream_response(history_so_far, latest):
-                # Guard: don't assume engine.py has set these attributes yet.
-                # Reading an unset attribute here would raise AttributeError
-                # on the very first message of the app's lifetime.
-                if getattr(stream_response, "last_urgent", False) and not urgent_shown:
-                    urgent_placeholder.markdown(URGENT_BANNER_HTML, unsafe_allow_html=True)
-                    urgent_shown = True
-                full_text += chunk
-                placeholder.markdown(full_text + "▌")
-            placeholder.markdown(full_text)
+            if response["urgent"]:
+                st.markdown(URGENT_BANNER_HTML, unsafe_allow_html=True)
+            st.markdown(response["text"])
         st.session_state.chat_history.append({
             "role": "assistant",
-            "text": getattr(stream_response, "last_full_text", None) or full_text,
-            "urgent": getattr(stream_response, "last_urgent", False),
+            "text": response["text"],
+            "urgent": response["urgent"],
         })
         st.rerun()
 
