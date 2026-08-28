@@ -59,6 +59,36 @@ if page == "💬 Health Info Chat":
         "Voice input available where supported by your browser/device."
     )
 
+    if "pending_query" not in st.session_state:
+        st.session_state.pending_query = ""
+
+    def ask(text: str):
+        result = build_response(text)
+        st.session_state.chat_history.append({"role": "user", "text": text})
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "text": result["text"],
+            "urgent": result["urgent"],
+            "lang": result["language_name"],
+        })
+
+    # Welcome message shown only before the first question is asked
+    if not st.session_state.chat_history:
+        st.success(
+            "👋 **Welcome!** I'm here to give you general health information, "
+            "help you find nearby care, and flag anything that needs urgent "
+            "attention. Type a question below, or tap a topic to try it out."
+        )
+        st.caption("Quick topics")
+        suggestions = ["Fever", "Cough and cold", "Loose motions", "Headache",
+                        "Skin rash", "Feeling stressed", "Child health", "Pregnancy care"]
+        cols = st.columns(4)
+        for i, s in enumerate(suggestions):
+            with cols[i % 4]:
+                if st.button(s, use_container_width=True, key=f"sugg_{i}"):
+                    ask(s)
+                    st.rerun()
+
     col_input, col_voice = st.columns([5, 1])
     with col_input:
         query = st.text_input(
@@ -72,14 +102,8 @@ if page == "💬 Health Info Chat":
     send = st.button("Ask", type="primary")
 
     if send and query.strip():
-        result = build_response(query)
-        st.session_state.chat_history.append({"role": "user", "text": query})
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "text": result["text"],
-            "urgent": result["urgent"],
-            "lang": result["language_name"],
-        })
+        ask(query)
+        st.rerun()
 
     for msg in reversed(st.session_state.chat_history):
         if msg["role"] == "user":
@@ -88,9 +112,6 @@ if page == "💬 Health Info Chat":
             box = st.error if msg.get("urgent") else st.success
             box(msg["text"])
         st.markdown("---")
-
-    if not st.session_state.chat_history:
-        st.caption("Try: \"my child has a fever\", \"I have loose motions\", \"feeling very stressed lately\"")
 
 # ================= PAGE 2: LOCATOR =================
 elif page == "🏥 Find Healthcare":
