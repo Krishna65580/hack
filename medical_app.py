@@ -18,7 +18,6 @@ from datetime import datetime, date
 from engine import build_response
 from locator import search_facilities
 from knowledge_base import EMERGENCY_CONTACTS, DISCLAIMER
-from speech import transcribe
 
 st.set_page_config(
     page_title="Rural Health Assistant",
