@@ -1,7 +1,3 @@
-a=1
-while a<=10:
-    a=a+a
-print(a)
 """
 Rural Health Assistant — HackSprint 2.0
 Problem Statement #2: Healthcare Accessibility and Rural Health Assistant
@@ -58,13 +54,7 @@ st.info(DISCLAIMER, icon="⚕️")
 # ================= PAGE 1: CHAT =================
 if page == "💬 Health Info Chat":
     st.title("Health Information Assistant")
-    st.caption(
-        "Ask about common symptoms or health topics in your own words. "
-        "Voice input available where supported by your browser/device."
-    )
-
-    if "pending_query" not in st.session_state:
-        st.session_state.pending_query = ""
+    st.caption("Ask about common symptoms or health topics in your own words.")
 
     def ask(text: str):
         result = build_response(text)
@@ -93,40 +83,16 @@ if page == "💬 Health Info Chat":
                     ask(s)
                     st.rerun()
 
-    if "voice_text" not in st.session_state:
-        st.session_state.voice_text = ""
-
-    col_input, col_voice = st.columns([5, 1])
-    with col_input:
-        query = st.text_input(
-            "Type your question",
-            value=st.session_state.voice_text,
-            placeholder="e.g. I have had a fever and cough for two days...",
-            label_visibility="collapsed",
-        )
-    with col_voice:
-        audio = mic_recorder(
-            start_prompt="🎤 Speak",
-            stop_prompt="⏹ Stop",
-            just_once=True,
-            use_container_width=True,
-            key="voice_recorder",
-        )
-
-    if audio and audio.get("bytes"):
-        with st.spinner("Transcribing..."):
-            text = transcribe(audio["bytes"])
-        if text:
-            st.session_state.voice_text = text
-            st.rerun()
-        else:
-            st.warning("Couldn't catch that — please try again or type your question.")
+    query = st.text_input(
+        "Type your question",
+        placeholder="e.g. I have had a fever and cough for two days...",
+        label_visibility="collapsed",
+    )
 
     send = st.button("Ask", type="primary")
 
     if send and query.strip():
         ask(query)
-        st.session_state.voice_text = ""
         st.rerun()
 
     for msg in reversed(st.session_state.chat_history):
