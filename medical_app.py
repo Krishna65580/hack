@@ -15,7 +15,6 @@ knowledge base and routes serious concerns to real medical professionals.
 
 import streamlit as st
 from datetime import datetime, date
-from streamlit_mic_recorder import mic_recorder
 from engine import build_response
 from locator import search_facilities
 from knowledge_base import EMERGENCY_CONTACTS, DISCLAIMER
