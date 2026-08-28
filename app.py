@@ -11,9 +11,11 @@ knowledge base and routes serious concerns to real medical professionals.
 
 import streamlit as st
 from datetime import datetime, date
+from streamlit_mic_recorder import mic_recorder
 from engine import build_response
 from locator import search_facilities
 from knowledge_base import EMERGENCY_CONTACTS, DISCLAIMER
+from speech import transcribe
 
 st.set_page_config(
     page_title="Rural Health Assistant",
@@ -89,20 +91,40 @@ if page == "💬 Health Info Chat":
                     ask(s)
                     st.rerun()
 
+    if "voice_text" not in st.session_state:
+        st.session_state.voice_text = ""
+
     col_input, col_voice = st.columns([5, 1])
     with col_input:
         query = st.text_input(
             "Type your question",
+            value=st.session_state.voice_text,
             placeholder="e.g. I have had a fever and cough for two days...",
             label_visibility="collapsed",
         )
     with col_voice:
-        st.button("🎤 Speak", help="Voice input — wire to browser SpeechRecognition API or a STT service for production", use_container_width=True)
+        audio = mic_recorder(
+            start_prompt="🎤 Speak",
+            stop_prompt="⏹ Stop",
+            just_once=True,
+            use_container_width=True,
+            key="voice_recorder",
+        )
+
+    if audio and audio.get("bytes"):
+        with st.spinner("Transcribing..."):
+            text = transcribe(audio["bytes"])
+        if text:
+            st.session_state.voice_text = text
+            st.rerun()
+        else:
+            st.warning("Couldn't catch that — please try again or type your question.")
 
     send = st.button("Ask", type="primary")
 
     if send and query.strip():
         ask(query)
+        st.session_state.voice_text = ""
         st.rerun()
 
     for msg in reversed(st.session_state.chat_history):
