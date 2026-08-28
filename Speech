@@ -1,0 +1,48 @@
+"""
+Speech-to-text helper.
+
+Uses SpeechRecognition's free Google Web Speech endpoint (no API key
+required, internet needed). Accepts raw audio bytes captured by the
+browser microphone (via streamlit-mic-recorder) and returns the
+transcribed text.
+
+Swap-in point: for production/offline reliability, replace
+`transcribe()`'s body with a call to a paid STT service (e.g. Whisper
+API) using the same function signature.
+"""
+
+import io
+import speech_recognition as sr
+from pydub import AudioSegment
+
+
+def _to_wav_bytes(audio_bytes: bytes) -> bytes:
+    """Browser mic recorders typically produce webm/ogg — convert to
+    wav in-memory so SpeechRecognition's AudioFile can read it."""
+    audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+    buf = io.BytesIO()
+    audio.export(buf, format="wav")
+    buf.seek(0)
+    return buf.read()
+
+
+def transcribe(audio_bytes: bytes, language: str = "en-IN") -> str:
+    """
+    Transcribe raw audio bytes (webm/wav captured from the browser mic)
+    to text. Returns an empty string if transcription fails, so the UI
+    can fall back gracefully instead of crashing.
+    """
+    if not audio_bytes:
+        return ""
+    recognizer = sr.Recognizer()
+    try:
+        wav_bytes = _to_wav_bytes(audio_bytes)
+        with sr.AudioFile(io.BytesIO(wav_bytes)) as source:
+            audio_data = recognizer.record(source)
+        return recognizer.recognize_google(audio_data, language=language)
+    except sr.UnknownValueError:
+        return ""
+    except sr.RequestError:
+        return ""
+    except Exception:
+        return ""
